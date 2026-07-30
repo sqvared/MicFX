@@ -1,0 +1,2 @@
+C:\Users\Sqvare\Desktop\MicFXApp\MicFXApp\bin\Release\net8.0-windows\win-x64\publish\MicFXApp.pdb
+C:\Users\Sqvare\Desktop\MicFXApp\MicFXApp\bin\Release\net8.0-windows\win-x64\publish\MicFXApp.exe
