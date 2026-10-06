@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="YellowDogMan.RRNoise.NET" Version="0.1.9" />
+    <Compile Include="../MicFXApp/Audio/Effects/IAudioEffect.cs" Link="IAudioEffect.cs" />
+    <Compile Include="../MicFXApp/Audio/Effects/NoiseSuppressorEffect.cs" Link="NoiseSuppressorEffect.cs" />
+    <Compile Include="../MicFXApp/Audio/Effects/RnNoiseProcessor.cs" Link="RnNoiseProcessor.cs" Condition="Exists('../MicFXApp/Audio/Effects/RnNoiseProcessor.cs')" />
+    <Compile Include="../MicFXApp/Audio/Effects/StreamingResampler.cs" Link="StreamingResampler.cs" Condition="Exists('../MicFXApp/Audio/Effects/StreamingResampler.cs')" />
+  </ItemGroup>
+</Project>

@@ -29,14 +29,75 @@ namespace MicFXApp.Audio
         /// <summary>Thread-safe add - use this instead of Chain.Add directly once the engine may be running.</summary>
         public void AddEffect(IAudioEffect effect)
         {
-            lock (_chainLock) { Chain.Add(effect); }
+            string? preparationError = null;
+            lock (_chainLock)
+            {
+                try
+                {
+                    if (IsRunning && _capture != null && effect is NoiseSuppressorEffect ns)
+                        ns.Prepare(_capture.WaveFormat.Channels, _capture.WaveFormat.SampleRate);
+                }
+                catch (Exception ex)
+                {
+                    if (!Chain.Contains(effect) && effect is IDisposable disposable) disposable.Dispose();
+                    preparationError = "Could not add effect: " + ex.Message;
+                }
+                if (preparationError == null)
+                    Chain.Add(effect);
+            }
+            if (preparationError != null)
+            {
+                ErrorOccurred?.Invoke(this, preparationError);
+                return;
+            }
             UpdateLoopbackCaptureIfNeeded();
         }
 
         /// <summary>Thread-safe remove - use this instead of Chain.Remove directly once the engine may be running.</summary>
         public void RemoveEffect(IAudioEffect effect)
         {
-            lock (_chainLock) { Chain.Remove(effect); }
+            lock (_chainLock)
+            {
+                if (Chain.Remove(effect) && effect is IDisposable disposable)
+                    disposable.Dispose();
+            }
+            UpdateLoopbackCaptureIfNeeded();
+        }
+
+        /// <summary>Publish a complete preset between callbacks, never a partial chain.</summary>
+        public void ReplaceEffects(System.Collections.Generic.List<IAudioEffect> effects)
+        {
+            string? preparationError = null;
+            lock (_chainLock)
+            {
+                try
+                {
+                    if (IsRunning && _capture != null)
+                        foreach (var effect in effects)
+                            if (effect is NoiseSuppressorEffect ns)
+                                ns.Prepare(_capture.WaveFormat.Channels, _capture.WaveFormat.SampleRate);
+                }
+                catch (Exception ex)
+                {
+                    foreach (var effect in effects)
+                        if (!Chain.Contains(effect) && effect is IDisposable disposable) disposable.Dispose();
+                    preparationError = "Could not load preset: " + ex.Message;
+                }
+                if (preparationError == null)
+                {
+                    var previous = Chain.ToArray();
+                    Chain.Clear();
+                    foreach (var effect in effects) Chain.Add(effect);
+                    foreach (var effect in previous)
+                        if (!effects.Contains(effect) && effect is IDisposable disposable)
+                            disposable.Dispose();
+                }
+            }
+            if (preparationError != null)
+            {
+                ErrorOccurred?.Invoke(this, preparationError);
+                return;
+            }
             UpdateLoopbackCaptureIfNeeded();
         }
 
@@ -112,7 +173,12 @@ namespace MicFXApp.Audio
 
                 lock (_chainLock)
                 {
-                    foreach (var fx in Chain) fx.Reset();
+                    foreach (var fx in Chain)
+                    {
+                        fx.Reset();
+                        if (fx is NoiseSuppressorEffect ns)
+                            ns.Prepare(format.Channels, format.SampleRate);
+                    }
                 }
 
                 _capture.DataAvailable += OnDataAvailable;
@@ -324,6 +390,19 @@ namespace MicFXApp.Audio
             Interlocked.Exchange(ref _spectrumSnapshot, bands);
         }
 
+        // Serialize processing with removal/disposal: a snapshot alone does not
+        // keep native denoiser state alive after an effect is removed by the UI.
+        private void ProcessEffects(float[] samples, int channels, int sampleRate)
+        {
+            lock (_chainLock)
+            {
+                foreach (var effect in Chain)
+                    // NS owns its latency-aligned bypass; keep its stream current.
+                    if (effect.Enabled || effect is NoiseSuppressorEffect)
+                        effect.Process(samples, channels, sampleRate);
+            }
+        }
+
         private void OnDataAvailable(object? sender, WaveInEventArgs e)
         {
             if (_capture == null) return;
@@ -340,14 +419,7 @@ namespace MicFXApp.Audio
             }
             InputPeak = inPeak;
 
-            IAudioEffect[] chainSnapshot;
-            lock (_chainLock) { chainSnapshot = Chain.ToArray(); }
-
-            foreach (var fx in chainSnapshot)
-            {
-                if (fx.Enabled)
-                    fx.Process(samples, format.Channels, format.SampleRate);
-            }
+            ProcessEffects(samples, format.Channels, format.SampleRate);
 
             float outPeak = 0;
             for (int i = 0; i < samples.Length; i++)
@@ -391,6 +463,12 @@ namespace MicFXApp.Audio
         public void Dispose()
         {
             Stop();
+            lock (_chainLock)
+            {
+                foreach (var effect in Chain)
+                    if (effect is IDisposable disposable) disposable.Dispose();
+                Chain.Clear();
+            }
         }
     }
 }

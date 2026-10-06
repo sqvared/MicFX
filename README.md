@@ -3,7 +3,7 @@
 ## What's new
 
 - **7 new effect stages** for a full noise-suppression chain: High-Pass Filter, Auto Gain
-  Control, adaptive Noise Suppressor (classical spectral subtraction, not ML), Expander/Gate,
+  Control, offline RNNoise Noise Suppressor, Expander/Gate,
   De-Esser, Limiter, and an experimental Echo Canceller (AEC).
 - **Presets** — save/load your chain to a `.json` file, plus a one-click built-in
   "Noise Suppression Chain" preset (Chain menu → PRESETS).
@@ -86,7 +86,127 @@ NAudio restores automatically as a NuGet package on first build.
 8. Click **Start** to begin routing into the virtual cable. In your call/recording app,
    select **CABLE Output** as the microphone.
 
+## Noise suppression: design and quality checks
+
+The suppressor uses **local, offline RNNoise** instead of the original per-bin
+spectral subtraction. No account, API key, GPU, or audio upload is required.
+The deployed application must include its native RNNoise library. Dependency
+restore requires internet during the build, not during audio processing.
+
+- **Amount** blends time-aligned original and denoised audio. At 0%, the original
+  signal is preserved with processing delay; at 100%, the denoised signal is used.
+  Start at 60%; increase for more noise reduction, decrease if speech sounds altered.
+- Unchecking the suppressor uses delayed dry audio while keeping its stream current.
+  It deliberately does not eliminate the effect's latency or CPU use. Remove the
+  effect to eliminate its processing, accepting a timing transition.
+- The built-in preset places suppression before AGC. Its optional gate starts
+  **disabled** to avoid chopping quiet words. Existing saved presets retain their
+  saved order and settings: load the new built-in preset to adopt these defaults.
+- For an initial listening comparison, use the suppressor alone. Disable noise
+  suppression in the receiving conferencing/recording app to avoid double processing.
+- Microphone clipping cannot be repaired by denoising. Keep input gain below clipping.
+
+### Why this architecture
+
+The old implementation applied two Hann windows at 50% overlap without synthesis
+normalization. Its reconstruction weights produced approximately 6.05 dB of
+periodic amplitude ripple even before denoising. Its output timeline also depended
+on callback partitioning, and it treated the first frame (including speech) as
+noise. Amount=0 still subtracted noise. Replacing this path addresses those defects;
+merely increasing suppression strength would not.
+
+RNNoise combines learned speech/noise estimation with DSP and broad frequency-band
+gains, avoiding the isolated-bin musical-noise mechanism of simple subtraction.[2]
+Current upstream training explicitly includes foreground noise such as keyboards.[1]
+**That does not establish the capabilities of this packaged model:** this integration
+pins `YellowDogMan.RRNoise.NET` **0.1.9**, whose recommended native fork appears to use
+legacy model weights; the package's precise native source/model build provenance
+has not been established. It is an evaluation baseline, not a claim to use the latest
+upstream RNNoise. The package's native Windows target for this application is **x64**.
+Do not infer x86 support from package directory names. See `THIRD-PARTY-NOTICES.txt`.
+
+DeepFilterNet is a possible follow-up comparison if this RNNoise model fails the
+listening checks, not a promised drop-in improvement.[6] No suppressor can be
+assumed to remove every keystroke during speech without damaging speech.
+
+### Measured evaluation (Linux native library)
+
+With the pinned package, the regression suite passed including external speech and
+recorded-typing fixtures. Results are fixture-specific, not a perceptual-quality
+certification or a Windows hardware benchmark:
+
+- At 48 kHz: 480 samples of native delay plus 480 samples of framing, **20 ms**
+  effect delay. Device/driver/output buffering adds further latency.
+- Stationary seeded noise: **12.16 dB** attenuation at Amount=100.
+- JFK speech excerpt: correlation **0.992**, energy change **−0.20 dB** at Amount=100.
+- Same speech with seeded white noise: SNR **15.27 → 18.05 dB**.
+- Recorded typing mixed with speech at 10 dB input SNR: **13.47 dB** output SNR
+  at Amount=60, versus **12.09 dB** at Amount=100. Typing alone was attenuated
+  **7.35 dB** and **21.60 dB**, respectively. Stronger is not always better for speech.
+- No steady-state managed allocation was measured in the suppressor tests.
+
+Optional fixture tests report **SKIP**, not pass, when their environment variables
+are absent. To reproduce using external recordings (requires curl and ffmpeg):
+
+```sh
+curl -fL https://raw.githubusercontent.com/openai/whisper/main/tests/jfk.flac -o /tmp/micfx-jfk.flac
+curl -fL https://raw.githubusercontent.com/karolpiczak/ESC-50/master/audio/1-137-A-32.wav -o /tmp/micfx-keyboard.wav
+ffmpeg -y -i /tmp/micfx-jfk.flac -ar 48000 -ac 1 -f f32le /tmp/micfx-jfk.f32
+ffmpeg -y -i /tmp/micfx-keyboard.wav -ar 48000 -ac 1 -f f32le /tmp/micfx-keyboard.f32
+MICFX_SPEECH_F32=/tmp/micfx-jfk.f32 MICFX_KEYBOARD_F32=/tmp/micfx-keyboard.f32 \
+  dotnet run --project MicFXApp.Tests/MicFXApp.Tests.csproj -c Release
+```
+
+Recordings are evaluation inputs only and are not included in the app or repository.
+Observe the source datasets' licensing before redistributing any audio. Broader
+speaker coverage, real fan recordings, and Windows listening remain acceptance work.
+
+### Acceptance checks
+
+Run the platform-independent DSP regression executable with .NET 8:
+
+```sh
+dotnet run --project MicFXApp.Tests/MicFXApp.Tests.csproj -c Release
+```
+
+Tests must exercise the real native library, not just a mocked inference call.
+Check identical results for different callback partitions, channel isolation,
+rate conversion, zero-strength reconstruction, reset/bypass, finite output, and
+noise reduction. Synthetic signals establish streaming/DSP invariants, **not**
+subjective voice quality. Measure actual processing latency rather than confusing
+frame size or output-buffer capacity with total latency.
+
+Before a Windows release, make loudness-matched A/B recordings of:
+
+1. Clean speech, including quiet words, sibilants, phrase starts/ends, and sustained vowels.
+2. Fan noise alone and fan noise during speech.
+3. Typing alone and typing during speech; include sharp/loud keys.
+4. Speaking immediately after Start, bypass/re-enable, preset replacement, and restart.
+5. The actual mic and VB-CABLE route under normal CPU load.
+
+Reject missing syllables, clicks/dropouts, or degraded clean speech even if the noise
+floor falls. Evaluate speech quality, background noise, and overall quality separately,
+as in the P.835-based DNS evaluation methodology; DNSMOS is an optional proxy, not a
+substitute for listening.[3] Linux DSP tests and cross-compilation cannot certify the
+Windows WASAPI/device path. No Windows listening or microphone latency result is
+claimed by the automated suite.
+
+## Sources
+
+[1] https://github.com/xiph/rnnoise
+[2] https://jmvalin.ca/demo/rnnoise
+[3] https://www.microsoft.com/en-us/research/academic-program/deep-noise-suppression-challenge-icassp-2023
+[6] https://github.com/Rikorose/DeepFilterNet
+
 ## Building the installer
+
+**RNNoise evaluation scope:** the existing `installer/Output/MicFX-Setup.exe` is
+an old artifact, not a build of these changes. The installer script has not been
+updated: it copies only the executable, not `THIRD-PARTY-NOTICES.txt`. Before
+redistributing a new installer, include that notice file in its installed files
+and perform the Windows acceptance checks above. For an evaluation publish,
+keep the notice file beside the executable. Do not treat a successful
+cross-build as a verified installer release.
 
 There's now an `installer/setup.iss` script ([Inno Setup](https://jrsoftware.org/isinfo.php))
 that produces a single `MicFX-Setup.exe`. It:

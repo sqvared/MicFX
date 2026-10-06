@@ -256,7 +256,7 @@ namespace MicFXApp
         {
             var result = MessageBox.Show(
                 "This replaces your current effect chain with the recommended noise-suppression chain " +
-                "(High-Pass \u2192 AGC \u2192 Noise Suppressor \u2192 Gate \u2192 De-Esser \u2192 Compressor \u2192 Limiter). Continue?",
+                "(High-Pass \u2192 Noise Suppressor \u2192 AGC \u2192 Gate [disabled] \u2192 De-Esser \u2192 Compressor \u2192 Limiter). Continue?",
                 "Load Noise Suppression Preset", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (result != MessageBoxResult.Yes) return;
 
@@ -265,10 +265,7 @@ namespace MicFXApp
 
         private void ReplaceChain(List<IAudioEffect> newEffects)
         {
-            foreach (var fx in _engine.Chain.ToArray())
-                _engine.RemoveEffect(fx);
-            foreach (var fx in newEffects)
-                _engine.AddEffect(fx);
+            _engine.ReplaceEffects(newEffects);
         }
     }
 }

@@ -93,7 +93,7 @@
                 <controls:KnobControl Value="{Binding Amount, Mode=TwoWay}" Minimum="0" Maximum="100"
                                        DefaultValue="60" Suffix="%" DecimalPlaces="0" Label="AMOUNT"
                                        AccentBrush="{StaticResource AccentNoise}" HorizontalAlignment="Left"/>
-                <TextBlock Text="Classical spectral subtraction, not a trained ML model - listens continuously and adapts to your room's noise floor."
+                <TextBlock Text="RNNoise runs locally to reduce background noise. Amount blends original and cleaned audio; lower it if quiet speech sounds altered. Bypass preserves processing delay."
                            Foreground="{StaticResource TextFaint}" FontSize="10" TextWrapping="Wrap" MaxWidth="360"
                            Margin="0,6,0,0" HorizontalAlignment="Left"/>
             </StackPanel>

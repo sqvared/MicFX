@@ -113,6 +113,8 @@ namespace MicFXApp.Audio
             ns.Amount = 60;
 
             var gate = new ExpanderGateEffect();
+            // Start voice-first: the optional gate can clip quiet consonants.
+            gate.Enabled = false;
             gate.ThresholdDb = -45;
             gate.Ratio = 4;
             gate.RangeDb = 25;
@@ -136,7 +138,7 @@ namespace MicFXApp.Audio
             // AEC deliberately left out of this default preset (and stays off by default when
             // added manually) - it's only useful if the mic can hear your own speakers, and
             // needlessly spending CPU/adding risk of artifacts otherwise.
-            return new List<IAudioEffect> { hpf, agc, ns, gate, deesser, comp, limiter };
+            return new List<IAudioEffect> { hpf, ns, agc, gate, deesser, comp, limiter };
         }
     }
 }
